@@ -1,57 +1,188 @@
-from fastapi import APIRouter, Depends
+from decimal import Decimal
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.business_logic.portfolio import (
+    validate_total_weight,
+    validate_updated_weight,
+)
 from app.database import get_db
 from app.dependencies import get_current_manager
+from app.models.portfolio_holding import PortfolioHolding
+from app.models.ticker import Ticker
+from app.schemas import HoldingCreate, HoldingOut, HoldingUpdate
 
 router = APIRouter()
 
-# ─────────────────────────────────────────────────────────────────────────────
-# TODO: Implement the endpoints below.
-# Refer to the API Endpoint Reference / FR-3 in ASSESSMENT-BRIEF.md.
-#
-# This is the domain-unique scoping concept for this assessment — every
-# endpoint here operates ONLY on the requesting manager's own rows. GET
-# /holdings must never leak another manager's holdings (the isolation test),
-# and POST/PUT must enforce that the SUM of target_weight_pct across the
-# manager's entire portfolio never exceeds 100 (the aggregate-constraint
-# test — unique to this domain, not present in treasury/commodity).
-# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post(
+    "/",
+    response_model=HoldingOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def add_holding(
+    holding_data: HoldingCreate,
+    db: Session = Depends(get_db),
+    acting_manager=Depends(get_current_manager),
+):
+    ticker = db.query(Ticker).filter(Ticker.id == holding_data.ticker_id).first()
+
+    if ticker is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticker not found",
+        )
+
+    if not ticker.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ticker is inactive",
+        )
+
+    existing_holding = (
+        db.query(PortfolioHolding)
+        .filter(
+            PortfolioHolding.manager_id == acting_manager.id,
+            PortfolioHolding.ticker_id == holding_data.ticker_id,
+        )
+        .first()
+    )
+
+    if existing_holding is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ticker is already in your portfolio",
+        )
+
+    existing_weights = [
+        holding.target_weight_pct
+        for holding in (
+            db.query(PortfolioHolding)
+            .filter(PortfolioHolding.manager_id == acting_manager.id)
+            .all()
+        )
+    ]
+
+    new_weight = Decimal(str(holding_data.target_weight_pct))
+
+    if not validate_total_weight(
+        existing_weights,
+        new_weight,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Total target weight would exceed 100%",
+        )
+
+    holding = PortfolioHolding(
+        manager_id=acting_manager.id,
+        ticker_id=holding_data.ticker_id,
+        target_weight_pct=new_weight,
+    )
+
+    db.add(holding)
+    db.commit()
+    db.refresh(holding)
+
+    return holding
 
 
-# POST /holdings
-# Add a ticker to the requesting manager's portfolio with a target_weight_pct.
-# BUSINESS RULE: cannot add the same ticker twice — return 400.
-# BUSINESS RULE: sum of target_weight_pct across the manager's ENTIRE
-#   portfolio (existing + new) must not exceed 100 — return 400 otherwise.
-@router.post("/")
-def add_holding(db: Session = Depends(get_db), acting_manager=Depends(get_current_manager)):
-    # TODO
-    return {"message": "Not implemented"}
+@router.get(
+    "/",
+    response_model=list[HoldingOut],
+)
+def get_holdings(
+    db: Session = Depends(get_db),
+    acting_manager=Depends(get_current_manager),
+):
+    return (
+        db.query(PortfolioHolding)
+        .filter(PortfolioHolding.manager_id == acting_manager.id)
+        .order_by(PortfolioHolding.id)
+        .all()
+    )
 
 
-# GET /holdings
-# Return ONLY the requesting manager's own portfolio.
-@router.get("/")
-def get_holdings(db: Session = Depends(get_db), acting_manager=Depends(get_current_manager)):
-    # TODO
-    return {"message": "Not implemented"}
+@router.put(
+    "/{ticker_id}",
+    response_model=HoldingOut,
+)
+def update_holding(
+    ticker_id: int,
+    holding_data: HoldingUpdate,
+    db: Session = Depends(get_db),
+    acting_manager=Depends(get_current_manager),
+):
+    holding = (
+        db.query(PortfolioHolding)
+        .filter(
+            PortfolioHolding.manager_id == acting_manager.id,
+            PortfolioHolding.ticker_id == ticker_id,
+        )
+        .first()
+    )
+
+    if holding is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Holding not found in your portfolio",
+        )
+
+    existing_weights = [
+        current_holding.target_weight_pct
+        for current_holding in (
+            db.query(PortfolioHolding)
+            .filter(PortfolioHolding.manager_id == acting_manager.id)
+            .all()
+        )
+    ]
+
+    new_weight = Decimal(str(holding_data.target_weight_pct))
+
+    if not validate_updated_weight(
+        existing_weights,
+        holding.target_weight_pct,
+        new_weight,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Total target weight would exceed 100%",
+        )
+
+    holding.target_weight_pct = new_weight
+
+    db.commit()
+    db.refresh(holding)
+
+    return holding
 
 
-# PUT /holdings/{ticker_id}
-# Update the target_weight_pct for a ticker already in the manager's portfolio.
-# BUSINESS RULE: same 100%-total constraint applies — recompute the total
-#   excluding the OLD value for this ticker before checking the new one.
-@router.put("/{ticker_id}")
-def update_holding(ticker_id: int, db: Session = Depends(get_db), acting_manager=Depends(get_current_manager)):
-    # TODO
-    return {"message": "Not implemented"}
+@router.delete(
+    "/{ticker_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def remove_holding(
+    ticker_id: int,
+    db: Session = Depends(get_db),
+    acting_manager=Depends(get_current_manager),
+):
+    holding = (
+        db.query(PortfolioHolding)
+        .filter(
+            PortfolioHolding.manager_id == acting_manager.id,
+            PortfolioHolding.ticker_id == ticker_id,
+        )
+        .first()
+    )
 
+    if holding is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Holding not found in your portfolio",
+        )
 
-# DELETE /holdings/{ticker_id}
-# Remove a ticker from the requesting manager's portfolio.
-# Removing something not held returns 404.
-@router.delete("/{ticker_id}")
-def remove_holding(ticker_id: int, db: Session = Depends(get_db), acting_manager=Depends(get_current_manager)):
-    # TODO
-    return {"message": "Not implemented"}
+    db.delete(holding)
+    db.commit()
+
+    return None

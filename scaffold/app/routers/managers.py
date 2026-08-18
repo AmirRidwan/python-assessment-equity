@@ -1,51 +1,149 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.portfolio_manager import PortfolioManager
+from app.schemas import ManagerCreate, ManagerOut, ManagerUpdate
 
 router = APIRouter()
 
-# ─────────────────────────────────────────────────────────────────────────────
-# TODO: Implement the endpoints below.
-# Refer to the Data Model / API Endpoint Reference / FR-1 in ASSESSMENT-BRIEF.md.
-# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post(
+    "",
+    response_model=ManagerOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_manager(
+    manager_data: ManagerCreate,
+    db: Session = Depends(get_db),
+):
+    existing_manager = (
+        db.query(PortfolioManager)
+        .filter(PortfolioManager.email == manager_data.email)
+        .first()
+    )
+
+    if existing_manager:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email is already registered",
+        )
+
+    manager = PortfolioManager(
+        name=manager_data.name,
+        email=manager_data.email,
+        seniority=manager_data.seniority,
+        active=True,
+    )
+
+    db.add(manager)
+    db.commit()
+    db.refresh(manager)
+
+    return manager
 
 
-# POST /managers
-# Create a new portfolio manager.
-# BUSINESS RULE: email must be unique — return 400 if it already exists.
-@router.post("/")
-def create_manager(db: Session = Depends(get_db)):
-    # TODO
-    return {"message": "Not implemented"}
+@router.get(
+    "",
+    response_model=list[ManagerOut],
+)
+def list_managers(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    offset = (page - 1) * page_size
+
+    managers = (
+        db.query(PortfolioManager)
+        .order_by(PortfolioManager.id)
+        .offset(offset)
+        .limit(page_size)
+        .all()
+    )
+
+    return managers
 
 
-# GET /managers
-# List all managers, paginated.
-@router.get("/")
-def list_managers(db: Session = Depends(get_db)):
-    # TODO
-    return {"message": "Not implemented"}
+@router.get(
+    "/{manager_id}",
+    response_model=ManagerOut,
+)
+def get_manager(
+    manager_id: int,
+    db: Session = Depends(get_db),
+):
+    manager = (
+        db.query(PortfolioManager).filter(PortfolioManager.id == manager_id).first()
+    )
+
+    if manager is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Portfolio manager not found",
+        )
+
+    return manager
 
 
-# GET /managers/{manager_id}
-# Get one manager or 404.
-@router.get("/{manager_id}")
-def get_manager(manager_id: int, db: Session = Depends(get_db)):
-    # TODO
-    return {"message": "Not implemented"}
+@router.put(
+    "/{manager_id}",
+    response_model=ManagerOut,
+)
+def update_manager(
+    manager_id: int,
+    manager_data: ManagerUpdate,
+    db: Session = Depends(get_db),
+):
+    manager = (
+        db.query(PortfolioManager).filter(PortfolioManager.id == manager_id).first()
+    )
+
+    if manager is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Portfolio manager not found",
+        )
+
+    if manager_data.email is not None:
+        existing_manager = (
+            db.query(PortfolioManager)
+            .filter(
+                PortfolioManager.email == manager_data.email,
+                PortfolioManager.id != manager_id,
+            )
+            .first()
+        )
+
+        if existing_manager:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email is already registered",
+            )
+
+    if manager_data.name is not None:
+        manager.name = manager_data.name
+
+    if manager_data.email is not None:
+        manager.email = manager_data.email
+
+    if manager_data.seniority is not None:
+        manager.seniority = manager_data.seniority
+
+    if manager_data.active is not None:
+        manager.active = manager_data.active
+
+    db.commit()
+    db.refresh(manager)
+
+    return manager
 
 
-# PUT /managers/{manager_id}
-# Update a manager's fields.
-@router.put("/{manager_id}")
-def update_manager(manager_id: int, db: Session = Depends(get_db)):
-    # TODO
-    return {"message": "Not implemented"}
-
-
-# DELETE /managers/{manager_id}
-# Not supported — deactivate instead so historical references stay valid.
-@router.delete("/{manager_id}", status_code=405)
+@router.delete(
+    "/{manager_id}",
+)
 def delete_manager(manager_id: int):
-    return {"detail": "Managers cannot be deleted — set active=false via PUT instead."}
+    raise HTTPException(
+        status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+        detail="Manager deletion is not supported; deactivate the manager instead",
+    )

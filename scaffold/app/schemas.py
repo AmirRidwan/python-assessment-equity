@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from typing import Literal
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -44,7 +45,7 @@ class TickerOut(BaseModel):
 
 # ── Price Snapshot ───────────────────────────────────────────────────────────
 class PriceSnapshotCreate(BaseModel):
-    price: float = Field(..., gt=0)
+    price: Decimal = Field(..., gt=0)
     volume: int = Field(..., ge=0)
     captured_at: datetime
     source: str = Field(..., min_length=1, max_length=100)
@@ -53,7 +54,7 @@ class PriceSnapshotCreate(BaseModel):
 class PriceSnapshotOut(BaseModel):
     id: int
     ticker_id: int
-    price: float
+    price: Decimal
     volume: int
     captured_at: datetime
     source: str
@@ -64,18 +65,18 @@ class PriceSnapshotOut(BaseModel):
 # ── Portfolio Holding ────────────────────────────────────────────────────────
 class HoldingCreate(BaseModel):
     ticker_id: int
-    target_weight_pct: float = Field(..., gt=0, le=100)
+    target_weight_pct: Decimal = Field(..., gt=0, le=100)
 
 
 class HoldingUpdate(BaseModel):
-    target_weight_pct: float = Field(..., gt=0, le=100)
+    target_weight_pct: Decimal = Field(..., gt=0, le=100)
 
 
 class HoldingOut(BaseModel):
     id: int
     manager_id: int
     ticker_id: int
-    target_weight_pct: float
+    target_weight_pct: Decimal
     added_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -90,8 +91,8 @@ class CrossoverSignalOut(BaseModel):
     ticker_id: int
     price_snapshot_id: int
     signal_type: SignalType
-    short_ma: float
-    long_ma: float
+    short_ma: Decimal
+    long_ma: Decimal
     detected_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
