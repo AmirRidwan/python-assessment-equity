@@ -110,18 +110,33 @@ scaffold/
 
 ## 3. Prerequisites
 
-Install the following before running the project:
+### Local Development
+
+Install:
 
 * Python 3.12
 * PostgreSQL 16
 * Git
-* Postman or another API client for manual testing
+* Postman or another API client
+
+### Docker
+
+For the containerized version, only Docker Desktop is required.
 
 ---
 
-## 4. Environment Setup
+## 4. Local Development Setup
 
-### 4.1 Create the virtual environment
+### 4.1 Clone the Repository
+
+```powershell
+git clone <YOUR_GITHUB_REPOSITORY_URL>
+cd scaffold
+```
+
+---
+
+### 4.2 Create a Virtual Environment
 
 Windows PowerShell:
 
@@ -147,7 +162,9 @@ Expected:
 Python 3.12.x
 ```
 
-### 4.2 Install dependencies
+---
+
+### 4.3 Install Dependencies
 
 ```powershell
 pip install -r requirements.txt
@@ -738,101 +755,339 @@ X-Manager-Id: {{manager_a_id}}
 
 ---
 
-## 19. Clean Setup From a Fresh Database
+## 19. Docker
 
-For a clean local reset:
+The project includes a Dockerized environment as a bonus task.
 
-1. Stop FastAPI.
-2. Reset/recreate the PostgreSQL `public` schema.
-3. Run migrations.
-4. Run seed data.
-5. Start FastAPI.
+The Docker setup contains two services:
 
-Example migration/seed sequence:
+```text
+FastAPI Application
+        |
+        | Docker Network
+        |
+PostgreSQL Database
+```
+
+### FastAPI Container
+
+The `Dockerfile`:
+
+* Uses Python 3.12 slim
+* Installs `requirements.txt`
+* Copies the application code
+* Copies Alembic configuration
+* Copies `seed.py`
+* Copies `run_migrations.py`
+* Creates the report directory
+* Runs Uvicorn on port 8000
+
+### PostgreSQL Container
+
+`compose.yaml` runs:
+
+```text
+postgres:16
+```
+
+Database configuration:
+
+```text
+Database: tickertrack_dev
+User: postgres
+```
+
+---
+
+## 20. Docker Architecture
+
+```text
+                         Host Machine
+                              |
+                              |
+                       localhost:8000
+                              |
+                              v
+                  +-----------------------+
+                  |   TickerTrack API     |
+                  |   FastAPI Container   |
+                  |   Python 3.12         |
+                  |       :8000           |
+                  +-----------+-----------+
+                              |
+                       Docker Network
+                              |
+                              v
+                  +-----------------------+
+                  | PostgreSQL Container  |
+                  |    PostgreSQL 16      |
+                  |   tickertrack_dev     |
+                  |       :5432           |
+                  +-----------------------+
+```
+
+Inside Docker, the API connects to PostgreSQL using:
+
+```text
+postgresql+psycopg2://postgres:postgres@db:5432/tickertrack_dev
+```
+
+`db` is the PostgreSQL service name defined in `compose.yaml`.
+
+The API does not use `localhost` to reach the database from inside the container.
+
+---
+
+## 21. Docker Healthcheck
+
+PostgreSQL has a healthcheck using:
+
+```text
+pg_isready
+```
+
+The API waits for PostgreSQL to become healthy before starting.
+
+This ensures the application does not attempt database connections before PostgreSQL is ready.
+
+---
+
+## 22. Docker Volumes
+
+The Docker Compose configuration uses persistent volumes for:
+
+```text
+tickertrack-db-data
+tickertrack-reports
+```
+
+The database volume stores PostgreSQL data.
+
+The reports volume stores generated Excel files.
+
+---
+
+## 23. Docker Setup
+
+Make sure Docker Desktop is running.
+
+Build and start:
 
 ```powershell
-python run_migrations.py
-python seed.py
-uvicorn app.main:app --reload --port 8000
+docker compose up -d --build
 ```
 
----
-
-## 20. Design Notes
-
-The project separates responsibilities into:
-
-```text
-Routers
-    ↓
-Business Logic
-    ↓
-SQLAlchemy Models
-    ↓
-PostgreSQL
-```
-
-Pure business rules are isolated where practical so they can be unit tested without requiring a database.
-
-Examples:
-
-```text
-moving_average.py
-crossover.py
-portfolio.py
-```
-
-The API routers are responsible for HTTP concerns, validation flow, database queries and HTTP status codes.
-
----
-
-## 21. Known Assumption
-
-The assessment brief requires report generation to be gated by manager seniority but does not explicitly define the minimum seniority level.
-
-The implementation assumes:
-
-```text
-analyst   → cannot generate reports
-associate → can generate reports
-principal → can generate reports
-```
-
-This assumption is documented in `NOTES.md`.
-
----
-
-## 22. Assessment Deliverables
-
-The project provides:
-
-* Working FastAPI application
-* PostgreSQL database integration
-* Alembic migrations
-* SQLAlchemy models
-* Pydantic schemas
-* Portfolio scoping logic
-* 100% target-weight validation
-* Moving-average crossover detection
-* Excel report generation
-* Unit tests
-* API tests
-* README documentation
-* Assessment notes
-
----
-
-## 23. Final Run
-
-From a clean clone:
+Check containers:
 
 ```powershell
+docker compose ps
+```
+
+Expected:
+
+```text
+tickertrack-db    Up (healthy)
+tickertrack-api   Up
+```
+
+---
+
+## 24. Run Docker Migrations
+
+The Docker PostgreSQL database is initially empty.
+
+Run:
+
+```powershell
+docker compose exec api python run_migrations.py
+```
+
+This creates the six application tables.
+
+---
+
+## 25. Seed Docker Database
+
+Run:
+
+```powershell
+docker compose exec api python seed.py
+```
+
+This loads the provided assessment seed data into the Docker PostgreSQL database.
+
+---
+
+## 26. Access the Dockerized API
+
+Health:
+
+```text
+http://localhost:8000/health
+```
+
+Swagger:
+
+```text
+http://localhost:8000/docs
+```
+
+Postman can continue using:
+
+```text
+http://127.0.0.1:8000
+```
+
+because port 8000 is mapped from the host to the API container.
+
+---
+
+## 27. Docker Logs and Utilities
+
+View API logs:
+
+```powershell
+docker compose logs -f api
+```
+
+View database logs:
+
+```powershell
+docker compose logs -f db
+```
+
+Open a shell in the API container:
+
+```powershell
+docker compose exec api sh
+```
+
+Open PostgreSQL:
+
+```powershell
+docker compose exec db psql -U postgres -d tickertrack_dev
+```
+
+Check containers:
+
+```powershell
+docker compose ps
+```
+
+---
+
+## 28. Stop Docker
+
+Stop the application and database containers:
+
+```powershell
+docker compose down
+```
+
+The Docker volumes remain intact.
+
+Starting again:
+
+```powershell
+docker compose up -d
+```
+
+will reuse the existing database volume.
+
+---
+
+## 29. Completely Reset Docker
+
+To remove the containers and database/report volumes:
+
+```powershell
+docker compose down -v
+```
+
+Then rebuild:
+
+```powershell
+docker compose up -d --build
+```
+
+Run migrations:
+
+```powershell
+docker compose exec api python run_migrations.py
+```
+
+Seed the database:
+
+```powershell
+docker compose exec api python seed.py
+```
+
+This creates a completely fresh Docker environment.
+
+---
+
+## 30. Clean Environment Docker Test
+
+The Dockerized application was tested from a clean environment using the following sequence:
+
+```powershell
+docker compose down -v
+docker compose up -d --build
+docker compose exec api python run_migrations.py
+docker compose exec api python seed.py
+```
+
+The following were then verified:
+
+```text
+PostgreSQL container starts
+PostgreSQL healthcheck passes
+FastAPI container starts
+Database migrations succeed
+Seed data loads successfully
+/health responds successfully
+/docs loads successfully
+API requests work through Postman
+Excel reports can be generated
+```
+
+This demonstrates that the project can be reproduced without relying on the host machine's local Python or PostgreSQL installation.
+
+---
+
+## 31. Database Submission Strategy
+
+The PostgreSQL data directory itself is not required to be committed to GitHub.
+
+The database can be reproduced using:
+
+```text
+Alembic migrations
++
+seed.py
++
+Docker PostgreSQL service
+```
+
+This allows a fresh environment to reconstruct the complete database schema and initial data.
+
+---
+
+## 32. Clean Clone Setup
+
+### Local
+
+```powershell
+git clone <YOUR_GITHUB_REPOSITORY_URL>
+cd scaffold
+
 python -m venv venv
 venv\Scripts\activate
+
 pip install -r requirements.txt
 ```
 
-Configure `.env`, create the PostgreSQL database, then:
+Configure `.env`, create `tickertrack_dev`, then:
 
 ```powershell
 python run_migrations.py
@@ -847,4 +1102,99 @@ Open:
 http://127.0.0.1:8000/docs
 ```
 
-The application is then ready for API testing and review.
+### Docker
+
+With Docker Desktop running:
+
+```powershell
+git clone <YOUR_GITHUB_REPOSITORY_URL>
+cd scaffold
+
+docker compose up -d --build
+docker compose exec api python run_migrations.py
+docker compose exec api python seed.py
+```
+
+Open:
+
+```text
+http://localhost:8000/docs
+```
+
+---
+
+## 33. Known Assumption
+
+The assessment requires report generation to be gated by manager seniority but does not explicitly define the minimum seniority level.
+
+The implementation assumes:
+
+```text
+analyst   → cannot generate reports
+associate → can generate reports
+principal → can generate reports
+```
+
+This is documented as an implementation assumption.
+
+---
+
+## 34. Assessment Deliverables
+
+The completed project includes:
+
+* FastAPI backend
+* PostgreSQL database
+* SQLAlchemy models
+* Alembic migrations
+* Pydantic schemas
+* Portfolio Manager management
+* Ticker and price management
+* Portfolio holding management
+* Manager portfolio isolation
+* Aggregate 100% target-weight validation
+* Moving-average calculations
+* Crossover signal detection
+* Signal API
+* Excel report generation
+* Report download
+* Unit tests
+* API tests
+* Postman testing
+* README documentation
+* NOTES.md
+* Dockerfile
+* Docker Compose configuration
+* Clean-environment Docker validation
+
+---
+
+## 35. Final Validation
+
+Run the full test suite:
+
+```powershell
+pytest -q
+```
+
+Expected result:
+
+```text
+0 failed
+```
+
+Verify Docker:
+
+```powershell
+docker compose down -v
+docker compose up -d --build
+docker compose exec api python run_migrations.py
+docker compose exec api python seed.py
+```
+
+Then verify:
+
+```text
+http://localhost:8000/health
+http://localhost:8000/docs
+```
