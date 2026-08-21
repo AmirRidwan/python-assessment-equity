@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -33,6 +33,12 @@ def generate_report(
     db: Session = Depends(get_db),
     acting_manager=Depends(get_current_manager),
 ):
+    if not acting_manager.active:
+        raise HTTPException(
+            status_code=400,
+            detail="Portfolio manager is inactive",
+        )
+
     if report_data.date_from > report_data.date_to:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -90,6 +96,8 @@ def generate_report(
         fgColor="FFF2CC",
     )
 
+    date_to_exclusive = report_data.date_to + timedelta(days=1)
+
     for holding in holdings:
         ticker = holding.ticker
 
@@ -98,7 +106,7 @@ def generate_report(
             .filter(
                 PriceSnapshot.ticker_id == ticker.id,
                 PriceSnapshot.captured_at >= report_data.date_from,
-                PriceSnapshot.captured_at < (report_data.date_to),
+                PriceSnapshot.captured_at < date_to_exclusive,
             )
             .order_by(PriceSnapshot.captured_at.asc())
             .all()
@@ -256,6 +264,12 @@ def list_reports(
     db: Session = Depends(get_db),
     acting_manager=Depends(get_current_manager),
 ):
+    if not acting_manager.active:
+        raise HTTPException(
+            status_code=400,
+            detail="Portfolio manager is inactive",
+        )
+
     offset = (page - 1) * page_size
 
     return (
@@ -276,6 +290,12 @@ def download_report(
     db: Session = Depends(get_db),
     acting_manager=Depends(get_current_manager),
 ):
+    if not acting_manager.active:
+        raise HTTPException(
+            status_code=400,
+            detail="Portfolio manager is inactive",
+        )
+
     report = (
         db.query(Report)
         .filter(

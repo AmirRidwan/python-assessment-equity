@@ -26,6 +26,12 @@ def add_holding(
     db: Session = Depends(get_db),
     acting_manager=Depends(get_current_manager),
 ):
+    if not acting_manager.active:
+        raise HTTPException(
+            status_code=400,
+            detail="Portfolio manager is inactive",
+        )
+
     ticker = db.query(Ticker).filter(Ticker.id == holding_data.ticker_id).first()
 
     if ticker is None:
@@ -96,6 +102,12 @@ def get_holdings(
     db: Session = Depends(get_db),
     acting_manager=Depends(get_current_manager),
 ):
+    if not acting_manager.active:
+        raise HTTPException(
+            status_code=400,
+            detail="Portfolio manager is inactive",
+        )
+
     return (
         db.query(PortfolioHolding)
         .filter(PortfolioHolding.manager_id == acting_manager.id)
@@ -114,6 +126,12 @@ def update_holding(
     db: Session = Depends(get_db),
     acting_manager=Depends(get_current_manager),
 ):
+    if not acting_manager.active:
+        raise HTTPException(
+            status_code=400,
+            detail="Portfolio manager is inactive",
+        )
+
     holding = (
         db.query(PortfolioHolding)
         .filter(
@@ -167,6 +185,12 @@ def remove_holding(
     db: Session = Depends(get_db),
     acting_manager=Depends(get_current_manager),
 ):
+    if not acting_manager.active:
+        raise HTTPException(
+            status_code=400,
+            detail="Portfolio manager is inactive",
+        )
+
     holding = (
         db.query(PortfolioHolding)
         .filter(
